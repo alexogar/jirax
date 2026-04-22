@@ -49,6 +49,13 @@ func NewStore(path string) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
+
 func (s *Store) Bootstrap() error {
 	schema := `
 CREATE TABLE IF NOT EXISTS issues (

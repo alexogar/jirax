@@ -40,6 +40,11 @@ func TestStoreRoundTripAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
 	if err := store.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
@@ -82,6 +87,11 @@ func TestStoreRecordSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
 	if err := store.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
@@ -108,6 +118,11 @@ func TestStoreKnowledgeQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
 	if err := store.Bootstrap(); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
