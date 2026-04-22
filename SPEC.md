@@ -603,12 +603,70 @@ Options:
 
 Purpose:
 
-- full-text and recent issue query over local cache
+- full-text and JQL query over the local cache and Jira
 
-Options:
+Requirements:
 
-- `--limit`
-- `--json`
+- support plain text local FTS search:
+  - `jirax search "timeout"`
+- support explicit JQL query:
+  - `jirax search --jql 'status = "In Progress"'`
+- combine current context scope with extra JQL using:
+  - `(scope) AND (extra)`
+- expose mode control:
+  - `--mode text`
+  - `--mode local`
+  - `--mode remote`
+  - `--mode auto`
+- in `auto` mode:
+  - try local cache first
+  - fall back to remote Jira JQL when the local engine does not support a feature
+- return resolved mode and resolved JQL in JSON output when `--jql` is used
+- support `--limit`
+- support `--json`
+
+Local JQL subset:
+
+- boolean logic:
+  - `AND`
+  - `OR`
+  - `NOT`
+  - parentheses
+- operators:
+  - `=`
+  - `!=`
+  - `~`
+  - `!~`
+  - `IN`
+  - `NOT IN`
+  - `>`
+  - `>=`
+  - `<`
+  - `<=`
+  - `IS EMPTY`
+  - `IS NOT EMPTY`
+- sorting:
+  - `ORDER BY field ASC|DESC`
+- minimum supported local fields:
+  - `project`
+  - `key`
+  - `summary`
+  - `description`
+  - `status`
+  - `issuetype`
+  - `priority`
+  - `assignee`
+  - `reporter`
+  - `labels`
+  - `created`
+  - `updated`
+  - cached custom fields by id, e.g. `customfield_10010`
+  - cached field aliases discovered from Jira field catalog, e.g. `sprint`
+
+Notes:
+
+- local JQL should be explicitly documented as a supported subset, not a claim of full Jira JQL compatibility
+- unsupported local JQL should produce a clear error so callers can retry with remote mode or rely on auto fallback
 
 ### 12.8 `jirax create`
 

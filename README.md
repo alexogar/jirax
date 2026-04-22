@@ -29,6 +29,7 @@ Most Jira CLIs make every read feel like a network round-trip. Jirax takes a dif
 
 ```text
 .
+├── example/commons-site/ # public Jira playground for assistants
 ├── cmd/jirax/           # CLI entrypoint
 ├── internal/jirax/      # app, config, Jira client, store, tests
 ├── SPEC.md              # product spec
@@ -232,6 +233,12 @@ You can also pass credentials inline:
   --token "jira_api_token"
 ```
 
+## Public Playground
+
+There is a ready-to-use public example in [example/commons-site](/Users/alekseiogarkov/Projects/code/jirax/example/commons-site/README.md).
+
+That folder is configured for Apache's public `COMMONSSITE` Jira project and is meant for testing Jirax with Codex or Copilot without using private company infrastructure.
+
 ## Test
 
 Run the full test suite:
@@ -252,7 +259,7 @@ The current test suite covers:
 - create/edit validation helpers
 - transition matching
 - issue normalization
-- SQLite bootstrap, sync-state persistence, issue round-trip, and FTS search
+- SQLite bootstrap, sync-state persistence, issue round-trip, FTS search, and local JQL filtering
 
 ## Command Guide
 
@@ -275,7 +282,31 @@ The current test suite covers:
 ./jirax issue DEMO-123 --json
 ./jirax search "billing timeout"
 ./jirax search --limit 50 --json sync
+./jirax search --jql 'status = "In Progress" AND labels in (cli, urgent)' --mode local --json
+./jirax search --jql 'assignee = currentUser() AND updated >= -7d' --mode remote --json
+./jirax search --jql 'project = DEMO AND sprint = "Sprint 4" ORDER BY updated DESC' --mode auto --json
 ```
+
+`jirax search` now supports two styles:
+
+- Text search: fast FTS search over the local cache.
+- JQL search: with `--jql`, Jirax combines the current context scope with your extra filter and runs it either locally, remotely, or with local-first fallback.
+
+JQL modes:
+
+- `--mode local`: run against the synced cache only.
+- `--mode remote`: send the resolved JQL to Jira directly.
+- `--mode auto`: try the local cache first and fall back to Jira if the query uses unsupported local JQL features.
+
+The local JQL engine intentionally supports a useful subset rather than pretending to implement all of Jira JQL. Supported local operators include:
+
+- boolean logic with `AND`, `OR`, `NOT`, and parentheses
+- `=`, `!=`, `~`, `!~`, `IN`, `NOT IN`
+- `>`, `>=`, `<`, `<=` for sortable text, numbers, and `created` or `updated`
+- `IS EMPTY`, `IS NOT EMPTY`
+- `ORDER BY ... ASC|DESC`
+
+Supported local fields include `project`, `key`, `summary`, `description`, `status`, `issuetype`, `priority`, `assignee`, `reporter`, `labels`, `created`, `updated`, and cached custom fields such as `customfield_10010` or field aliases discovered during sync.
 
 ### Writes
 

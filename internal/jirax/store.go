@@ -413,6 +413,41 @@ LIMIT ?;
 	return out, rows.Err()
 }
 
+func (s *Store) SearchIssuesByJQL(ctx context.Context, jql string, limit int) ([]IssueView, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query, err := parseLocalJQL(jql)
+	if err != nil {
+		return nil, err
+	}
+
+	aliases, err := s.listFieldAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := s.listIssuesForLocalJQL(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]IssueView, 0, len(issues))
+	for _, issue := range issues {
+		match, err := query.filter.Eval(&issue, aliases)
+		if err != nil {
+			return nil, err
+		}
+		if match {
+			filtered = append(filtered, issue)
+		}
+	}
+	sortIssuesByLocalJQL(filtered, query.orderBy, aliases)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
+}
+
 func (s *Store) LogOperation(ctx context.Context, op, issueKey, reqJSON, status string) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO operation_log(operation, issue_key, request_json, status, created_at)
@@ -425,6 +460,65 @@ func (s *Store) CountIssues(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues;`).Scan(&count)
 	return count, err
+}
+
+func (s *Store) listIssuesForLocalJQL(ctx context.Context) ([]IssueView, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT issue_key, summary, status, issue_type, priority, assignee, reporter, project_key, created_at, updated_at, description, labels_json, custom_json
+FROM issues;
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []IssueView
+	for rows.Next() {
+		var issue IssueView
+		var labelsJSON, customJSON sql.NullString
+		if err := rows.Scan(
+			&issue.Key,
+			&issue.Summary,
+			&issue.Status,
+			&issue.IssueType,
+			&issue.Priority,
+			&issue.Assignee,
+			&issue.Reporter,
+			&issue.Project,
+			&issue.CreatedAt,
+			&issue.UpdatedAt,
+			&issue.Description,
+			&labelsJSON,
+			&customJSON,
+		); err != nil {
+			return nil, err
+		}
+		decodeJSONValue(labelsJSON.String, &issue.Labels)
+		decodeJSONValue(customJSON.String, &issue.CustomFields)
+		out = append(out, issue)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) listFieldAliases(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT alias, field_id
+FROM field_aliases;
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var alias, fieldID string
+		if err := rows.Scan(&alias, &fieldID); err != nil {
+			return nil, err
+		}
+		out[normalizeLocalJQLIdentifier(alias)] = fieldID
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListFields(ctx context.Context) ([]FieldInfo, error) {

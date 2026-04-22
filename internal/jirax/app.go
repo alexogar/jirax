@@ -481,6 +481,8 @@ func (a *App) runSearch(ctx context.Context, args []string) error {
 	fs.SetOutput(os.Stderr)
 	outputJSON := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 20, "Result limit")
+	jql := fs.String("jql", "", "JQL query to run against local cache, Jira, or both")
+	mode := fs.String("mode", "auto", "Search mode: text, local, remote, auto")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -495,12 +497,20 @@ func (a *App) runSearch(ctx context.Context, args []string) error {
 	}
 	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
 
-	results, err := a.store.SearchIssues(ctx, query, *limit)
+	results, resolvedMode, resolvedJQL, err := a.searchIssues(ctx, query, *jql, *mode, *limit)
 	if err != nil {
 		return err
 	}
 	if *outputJSON {
-		return printJSON(map[string]any{"results": results})
+		return printJSON(map[string]any{
+			"results": results,
+			"mode":    resolvedMode,
+			"jql":     resolvedJQL,
+		})
+	}
+	if resolvedJQL != "" {
+		fmt.Printf("mode: %s\n", resolvedMode)
+		fmt.Printf("jql: %s\n", resolvedJQL)
 	}
 	for _, issue := range results {
 		fmt.Printf("%-12s %-12s %s\n", issue.Key, issue.Status, issue.Summary)
@@ -812,7 +822,7 @@ Commands:
   jirax know [overview|fields|statuses|types|transitions ISSUE-123] [--json]
   jirax sync [--full] [--json]
   jirax issue ISSUE-123 [--json]
-  jirax search [query] [--limit N] [--json]
+  jirax search [query] [--jql QUERY] [--mode text|local|remote|auto] [--limit N] [--json]
   jirax create --project KEY --type Task --summary "..." [--description "..."] [--fields-json '{}'] [--dry-run]
   jirax edit ISSUE-123 --fields-json '{"summary":"..."}' [--dry-run]
   jirax comment ISSUE-123 --body "..." [--dry-run]
@@ -826,6 +836,79 @@ Environment:
   JIRAX_INSECURE_SKIP_VERIFY
   JIRAX_DB_PATH
 `)
+}
+
+func (a *App) searchIssues(ctx context.Context, textQuery, jqlQuery, mode string, limit int) ([]IssueView, string, string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "auto"
+	}
+
+	if strings.TrimSpace(jqlQuery) == "" {
+		if mode == "local" || mode == "remote" || mode == "auto" || mode == "text" {
+			results, err := a.store.SearchIssues(ctx, textQuery, limit)
+			return results, "text", "", err
+		}
+		return nil, "", "", fmt.Errorf("unsupported search mode %q", mode)
+	}
+
+	combinedJQL := combineJQL(a.config.Context.ScopeJQL(), jqlQuery)
+	switch mode {
+	case "text":
+		return nil, "", "", errors.New("--jql cannot be used with --mode text")
+	case "local":
+		results, err := a.store.SearchIssuesByJQL(ctx, combinedJQL, limit)
+		return results, "local", combinedJQL, err
+	case "remote":
+		results, err := a.searchIssuesRemote(ctx, combinedJQL, limit)
+		return results, "remote", combinedJQL, err
+	case "auto":
+		results, err := a.store.SearchIssuesByJQL(ctx, combinedJQL, limit)
+		if err == nil {
+			return results, "local", combinedJQL, nil
+		}
+		results, remoteErr := a.searchIssuesRemote(ctx, combinedJQL, limit)
+		if remoteErr != nil {
+			return nil, "", combinedJQL, fmt.Errorf("local JQL unsupported (%v) and remote search failed (%v)", err, remoteErr)
+		}
+		return results, "remote", combinedJQL, nil
+	default:
+		return nil, "", "", fmt.Errorf("unsupported search mode %q", mode)
+	}
+}
+
+func (a *App) searchIssuesRemote(ctx context.Context, jql string, limit int) ([]IssueView, error) {
+	issues, err := a.jira.SearchIssues(ctx, SearchOptions{
+		JQL:        jql,
+		Fields:     a.config.Context.AllFields(),
+		Full:       true,
+		MaxResults: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]IssueView, 0, len(issues))
+	for _, issue := range issues {
+		view, _, _, _, normErr := normalizeIssue(issue)
+		if normErr != nil {
+			return nil, normErr
+		}
+		out = append(out, *view)
+	}
+	return out, nil
+}
+
+func combineJQL(scope, extra string) string {
+	scope = strings.TrimSpace(scope)
+	extra = strings.TrimSpace(extra)
+	switch {
+	case scope == "":
+		return extra
+	case extra == "":
+		return scope
+	default:
+		return fmt.Sprintf("(%s) AND (%s)", scope, extra)
+	}
 }
 
 type SyncOptions struct {

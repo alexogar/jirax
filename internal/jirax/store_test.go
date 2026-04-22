@@ -3,6 +3,8 @@ package jirax
 import (
 	"context"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +77,14 @@ func TestStoreRoundTripAndSearch(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Key != "DEMO-1" {
 		t.Fatalf("unexpected search results: %+v", results)
+	}
+
+	jqlResults, err := store.SearchIssuesByJQL(ctx, `project = DEMO AND status = "In Progress" AND sprint = "Sprint 4"`, 10)
+	if err != nil {
+		t.Fatalf("SearchIssuesByJQL() error = %v", err)
+	}
+	if len(jqlResults) != 1 || jqlResults[0].Key != "DEMO-1" {
+		t.Fatalf("unexpected JQL results: %+v", jqlResults)
 	}
 }
 
@@ -178,6 +188,79 @@ func TestStoreKnowledgeQueries(t *testing.T) {
 	}
 }
 
+func TestStoreSearchIssuesByJQLSupportsComplexFiltering(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewStore(filepath.Join(dir, "jirax.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+	if err := store.Bootstrap(); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	if err := store.UpsertFieldCatalog(ctx, []FieldDefinition{
+		{ID: "customfield_10010", Name: "Sprint", Custom: true},
+	}); err != nil {
+		t.Fatalf("UpsertFieldCatalog() error = %v", err)
+	}
+	if err := store.UpsertIssueBundle(ctx, sampleIssue(), ContextConfig{Name: "default", Project: "DEMO"}); err != nil {
+		t.Fatalf("UpsertIssueBundle() error = %v", err)
+	}
+	if err := store.UpsertIssueBundle(ctx, sampleIssueTwo(), ContextConfig{Name: "default", Project: "PLAT"}); err != nil {
+		t.Fatalf("UpsertIssueBundle() error = %v", err)
+	}
+
+	results, err := store.SearchIssuesByJQL(ctx, `labels in (cli, urgent) AND updated >= "2026-04-22 00:00" ORDER BY updated DESC`, 10)
+	if err != nil {
+		t.Fatalf("SearchIssuesByJQL() error = %v", err)
+	}
+	gotKeys := []string{}
+	for _, item := range results {
+		gotKeys = append(gotKeys, item.Key)
+	}
+	wantKeys := []string{"PLAT-7", "DEMO-1"}
+	if !reflect.DeepEqual(gotKeys, wantKeys) {
+		t.Fatalf("SearchIssuesByJQL() keys = %v, want %v", gotKeys, wantKeys)
+	}
+}
+
+func TestStoreSearchIssuesByJQLReturnsUnsupportedForUnsupportedSyntax(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewStore(filepath.Join(dir, "jirax.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+	if err := store.Bootstrap(); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	if err := store.UpsertIssueBundle(ctx, sampleIssue(), ContextConfig{Name: "default", Project: "DEMO"}); err != nil {
+		t.Fatalf("UpsertIssueBundle() error = %v", err)
+	}
+
+	_, err = store.SearchIssuesByJQL(ctx, `assignee = currentUser()`, 10)
+	if err == nil {
+		t.Fatal("expected unsupported local JQL error")
+	}
+	if !strings.Contains(err.Error(), "unsupported local JQL") {
+		t.Fatalf("expected unsupported local JQL error, got %v", err)
+	}
+}
+
 func sampleIssue() JiraIssue {
 	return JiraIssue{
 		ID:  "10001",
@@ -218,6 +301,27 @@ func sampleIssue() JiraIssue {
 					},
 				},
 			},
+		},
+	}
+}
+
+func sampleIssueTwo() JiraIssue {
+	return JiraIssue{
+		ID:  "10002",
+		Key: "PLAT-7",
+		Fields: map[string]any{
+			"summary":           "Harden sync retries for enterprise Jira",
+			"description":       "Handle proxy timeouts and rate limiting cleanly.",
+			"status":            map[string]any{"name": "To Do"},
+			"issuetype":         map[string]any{"name": "Bug"},
+			"priority":          map[string]any{"name": "Medium"},
+			"assignee":          map[string]any{"displayName": "Jordan"},
+			"reporter":          map[string]any{"displayName": "Taylor"},
+			"project":           map[string]any{"key": "PLAT"},
+			"created":           "2026-04-23T08:00:00.000+0000",
+			"updated":           "2026-04-23T09:30:00.000+0000",
+			"labels":            []any{"cli", "urgent"},
+			"customfield_10010": "Sprint 5",
 		},
 	}
 }

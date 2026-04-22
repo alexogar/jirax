@@ -1,0 +1,20 @@
+{
+  "server": {
+    "base_url": "https://issues.apache.org/jira"
+  },
+  "context": {
+    "name": "apache-commons-site",
+    "project": "COMMONSSITE",
+    "fields": {
+      "summary": "summary",
+      "description": "description",
+      "status": "status",
+      "issue_type": "issuetype",
+      "priority": "priority",
+      "labels": "labels"
+    }
+  },
+  "aliases": {
+    "type": "issuetype"
+  }
+}

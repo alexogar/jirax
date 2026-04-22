@@ -23,6 +23,7 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
    `./jirax issue ISSUE-123 --json`
 4. Search the synced cache with:
    `./jirax search "query" --json`
+   `./jirax search --jql 'status = "In Progress"' --mode auto --json`
 5. Before transitioning an issue, inspect allowed transitions:
    `./jirax know transitions ISSUE-123 --json`
 6. For writes, prefer dry runs first:
@@ -36,6 +37,7 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
 - Treat `jirax know` as the default orientation step for agents.
 - Use JSON output whenever the result will feed another step.
 - Use cached field and status information to avoid inventing field ids, issue types, or workflow states.
+- Prefer `search --jql ... --mode auto --json` when the task needs structured filtering; it uses the cache first and falls back to Jira for unsupported local JQL.
 - Use `know transitions` before choosing a transition target because workflows vary per issue.
 - In multi-project contexts, pass `--project` explicitly on `create` unless the config clearly resolves to one project.
 - If the local context looks wrong, reset scope with `./jirax ctx set ...` and sync again.
@@ -51,4 +53,5 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
 ./jirax know transitions ISSUE-123 --json
 ./jirax issue ISSUE-123 --json
 ./jirax search "text" --json
+./jirax search --jql 'status = "In Progress" AND labels in (cli, urgent)' --mode auto --json
 ```

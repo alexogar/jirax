@@ -229,9 +229,7 @@ func (c *Config) ValidateContext() error {
 }
 
 func (c *Config) HasServer() bool {
-	return strings.TrimSpace(c.Server.BaseURL) != "" &&
-		strings.TrimSpace(c.Server.User) != "" &&
-		strings.TrimSpace(c.Server.Token) != ""
+	return strings.TrimSpace(c.Server.BaseURL) != ""
 }
 
 func (c ContextConfig) ScopeJQL() string {

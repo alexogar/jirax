@@ -33,10 +33,11 @@ const (
 )
 
 type SearchOptions struct {
-	JQL       string
-	Fields    []string
-	UpdatedAt time.Time
-	Full      bool
+	JQL        string
+	Fields     []string
+	UpdatedAt  time.Time
+	Full       bool
+	MaxResults int
 }
 
 type JiraIssue struct {
@@ -148,6 +149,15 @@ func (j *JiraClient) SearchIssues(ctx context.Context, opts SearchOptions) ([]Ji
 	maxResults := 50
 	var all []JiraIssue
 	for {
+		if opts.MaxResults > 0 {
+			remaining := opts.MaxResults - len(all)
+			if remaining <= 0 {
+				break
+			}
+			if remaining < maxResults {
+				maxResults = remaining
+			}
+		}
 		payload := map[string]any{
 			"jql":        jql,
 			"startAt":    startAt,
@@ -160,6 +170,9 @@ func (j *JiraClient) SearchIssues(ctx context.Context, opts SearchOptions) ([]Ji
 			return nil, err
 		}
 		all = append(all, resp.Issues...)
+		if opts.MaxResults > 0 && len(all) >= opts.MaxResults {
+			break
+		}
 		startAt += len(resp.Issues)
 		if startAt >= resp.Total || len(resp.Issues) == 0 {
 			break
@@ -280,7 +293,9 @@ func (j *JiraClient) doJSON(ctx context.Context, method, path string, body any, 
 		if err != nil {
 			return err
 		}
-		req.SetBasicAuth(j.user, j.token)
+		if j.user != "" || j.token != "" {
+			req.SetBasicAuth(j.user, j.token)
+		}
 		req.Header.Set("Accept", "application/json")
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
