@@ -104,6 +104,7 @@ func TestLoadDiscoveredConfigMergesProjectAndOverlay(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".jirax.json"), []byte(`{
   "server": {"base_url":"https://jira.example.com","user":"agent@example.com","ca_cert_file":"/tmp/company-ca.pem"},
+  "sync": {"check_interval_minutes":30,"max_staleness_minutes":180},
   "context": {"projects":["OPS","PLAT"],"fields":{"sprint":"customfield_10010"}},
   "aliases": {"sprint":"customfield_10010"}
 }`), 0o600); err != nil {
@@ -139,6 +140,9 @@ func TestLoadDiscoveredConfigMergesProjectAndOverlay(t *testing.T) {
 	if cfg.Server.CACertFile != "/tmp/company-ca.pem" {
 		t.Fatalf("unexpected ca cert file: %+v", cfg.Server)
 	}
+	if cfg.Sync.CheckIntervalMinutes != 30 || cfg.Sync.MaxStalenessMinutes != 180 || !cfg.Sync.AllowStaleOnError {
+		t.Fatalf("unexpected sync config: %+v", cfg.Sync)
+	}
 	if cfg.Aliases["sprint"] != "customfield_10010" {
 		t.Fatalf("expected alias to survive merge, got %+v", cfg.Aliases)
 	}
@@ -154,6 +158,9 @@ user=agent@example.com
 token=top-secret
 ca_cert_file=/tmp/company-ca.pem
 insecure_skip_verify=true
+check_interval_minutes=20
+max_staleness_minutes=90
+allow_stale_on_error=true
 name=repo
 project=PLAT
 projects=
@@ -173,6 +180,9 @@ alias.sprint=customfield_10010
 	}
 	if cfg.Server.CACertFile != "/tmp/company-ca.pem" || !cfg.Server.InsecureSkipVerify {
 		t.Fatalf("unexpected tls config: %+v", cfg.Server)
+	}
+	if cfg.Sync.CheckIntervalMinutes != 20 || cfg.Sync.MaxStalenessMinutes != 90 || !cfg.Sync.AllowStaleOnError {
+		t.Fatalf("unexpected sync config: %+v", cfg.Sync)
 	}
 	if !reflect.DeepEqual(cfg.Context.Fields, FieldMap{
 		"customfield_10010": "customfield_10010",
@@ -206,5 +216,15 @@ fields=sprint:customfield_10010
 	}
 	if cfg.Context.Project != "" {
 		t.Fatalf("expected single project to be empty: %+v", cfg.Context)
+	}
+}
+
+func TestApplyEnvFallbacksSetsSyncDefaults(t *testing.T) {
+	cfg := &Config{}
+	if err := cfg.ApplyEnvFallbacks(); err != nil {
+		t.Fatalf("ApplyEnvFallbacks() error = %v", err)
+	}
+	if cfg.Sync.CheckIntervalMinutes != 15 || cfg.Sync.MaxStalenessMinutes != 240 || !cfg.Sync.AllowStaleOnError {
+		t.Fatalf("unexpected sync defaults: %+v", cfg.Sync)
 	}
 }

@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
 	Server       ServerConfig      `json:"server"`
 	Context      ContextConfig     `json:"context"`
+	Sync         SyncConfig        `json:"sync,omitempty"`
 	DatabasePath string            `json:"database_path"`
 	Aliases      map[string]string `json:"aliases"`
 }
@@ -34,6 +37,12 @@ type ContextConfig struct {
 }
 
 type FieldMap map[string]string
+
+type SyncConfig struct {
+	CheckIntervalMinutes int  `json:"check_interval_minutes,omitempty"`
+	MaxStalenessMinutes  int  `json:"max_staleness_minutes,omitempty"`
+	AllowStaleOnError    bool `json:"allow_stale_on_error,omitempty"`
+}
 
 type ConfigDiscovery struct {
 	RootDir       string
@@ -194,6 +203,18 @@ func (c *Config) ApplyEnvFallbacks() error {
 	if c.Aliases == nil {
 		c.Aliases = map[string]string{}
 	}
+	if c.Sync.CheckIntervalMinutes <= 0 {
+		c.Sync.CheckIntervalMinutes = 15
+	}
+	if c.Sync.MaxStalenessMinutes <= 0 {
+		c.Sync.MaxStalenessMinutes = 240
+	}
+	if c.Sync.MaxStalenessMinutes < c.Sync.CheckIntervalMinutes {
+		c.Sync.MaxStalenessMinutes = c.Sync.CheckIntervalMinutes
+	}
+	if !c.Sync.AllowStaleOnError {
+		c.Sync.AllowStaleOnError = true
+	}
 	return nil
 }
 
@@ -206,6 +227,22 @@ func (c *Config) Clone() *Config {
 		cp.Aliases[k] = v
 	}
 	return &cp
+}
+
+func (c SyncConfig) CheckInterval() time.Duration {
+	minutes := c.CheckIntervalMinutes
+	if minutes <= 0 {
+		minutes = 15
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (c SyncConfig) MaxStaleness() time.Duration {
+	minutes := c.MaxStalenessMinutes
+	if minutes <= 0 {
+		minutes = 240
+	}
+	return time.Duration(minutes) * time.Minute
 }
 
 func (c *Config) ValidateContext() error {
@@ -336,6 +373,12 @@ func mergeConfConfig(cfg *Config, path string) error {
 			cfg.Server.InsecureSkipVerify = strings.EqualFold(value, "true") || value == "1" || strings.EqualFold(value, "yes")
 		case "database_path":
 			cfg.DatabasePath = value
+		case "check_interval_minutes":
+			cfg.Sync.CheckIntervalMinutes = atoiOrZero(value)
+		case "max_staleness_minutes":
+			cfg.Sync.MaxStalenessMinutes = atoiOrZero(value)
+		case "allow_stale_on_error":
+			cfg.Sync.AllowStaleOnError = strings.EqualFold(value, "true") || value == "1" || strings.EqualFold(value, "yes")
 		case "name":
 			cfg.Context.Name = value
 		case "project":
@@ -400,6 +443,15 @@ func mergeConfig(dst, src *Config) {
 	if src.DatabasePath != "" {
 		dst.DatabasePath = src.DatabasePath
 	}
+	if src.Sync.CheckIntervalMinutes > 0 {
+		dst.Sync.CheckIntervalMinutes = src.Sync.CheckIntervalMinutes
+	}
+	if src.Sync.MaxStalenessMinutes > 0 {
+		dst.Sync.MaxStalenessMinutes = src.Sync.MaxStalenessMinutes
+	}
+	if src.Sync.AllowStaleOnError {
+		dst.Sync.AllowStaleOnError = true
+	}
 	if dst.Aliases == nil {
 		dst.Aliases = map[string]string{}
 	}
@@ -416,6 +468,14 @@ func fileExists(path string) bool {
 func envBool(key string) bool {
 	value := strings.TrimSpace(os.Getenv(key))
 	return strings.EqualFold(value, "true") || value == "1" || strings.EqualFold(value, "yes")
+}
+
+func atoiOrZero(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func (f FieldMap) Clone() FieldMap {

@@ -18,6 +18,7 @@ type App struct {
 	store      *Store
 	jira       *JiraClient
 	discovery  *ConfigDiscovery
+	now        func() time.Time
 }
 
 type UsageError struct {
@@ -46,6 +47,7 @@ func NewApp() (*App, error) {
 		configPath: discovery.OverlayConfig,
 		config:     cfg,
 		discovery:  discovery,
+		now:        time.Now,
 	}
 	if cfg.HasServer() {
 		app.jira = NewJiraClient(cfg)
@@ -128,6 +130,8 @@ func (a *App) runContext(ctx context.Context, args []string) error {
 	jql := fs.String("jql", "", "JQL scope")
 	name := fs.String("name", "default", "Context name")
 	fieldsCSV := fs.String("fields", "", "Comma-separated additional fields")
+	syncCheckMinutes := fs.Int("sync-check-minutes", 0, "How often Jirax should check for remote updates before read commands")
+	syncMaxStaleMinutes := fs.Int("sync-max-stale-minutes", 0, "Maximum cache age before Jirax auto-syncs")
 	outputJSON := fs.Bool("json", false, "JSON output")
 
 	if err := fs.Parse(args[1:]); err != nil {
@@ -160,6 +164,12 @@ func (a *App) runContext(ctx context.Context, args []string) error {
 		cfg.Context.Projects = nil
 	}
 	cfg.Context.Fields = parseFieldMapCSV(*fieldsCSV)
+	if *syncCheckMinutes > 0 {
+		cfg.Sync.CheckIntervalMinutes = *syncCheckMinutes
+	}
+	if *syncMaxStaleMinutes > 0 {
+		cfg.Sync.MaxStalenessMinutes = *syncMaxStaleMinutes
+	}
 	if *baseURL != "" {
 		cfg.Server.BaseURL = *baseURL
 	}
@@ -537,6 +547,9 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
+	if err := a.syncIfNeeded(ctx); err != nil {
+		return err
+	}
 	if *project == "" {
 		switch {
 		case a.config.Context.Project != "":
@@ -615,6 +628,9 @@ func (a *App) runEdit(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
+	if err := a.syncIfNeeded(ctx); err != nil {
+		return err
+	}
 	key := fs.Arg(0)
 	fields, err := parseJSONObject(*fieldsJSON)
 	if err != nil {
@@ -681,6 +697,9 @@ func (a *App) runComment(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
+	if err := a.syncIfNeeded(ctx); err != nil {
+		return err
+	}
 	key := fs.Arg(0)
 	if *body == "" {
 		return errors.New("--body is required")
@@ -728,6 +747,9 @@ func (a *App) runTransition(ctx context.Context, args []string) error {
 		return err
 	}
 	if err := a.ensureStore(); err != nil {
+		return err
+	}
+	if err := a.syncIfNeeded(ctx); err != nil {
 		return err
 	}
 	key := fs.Arg(0)
@@ -790,8 +812,77 @@ func (a *App) requireConfigured() error {
 }
 
 func (a *App) syncIfNeeded(ctx context.Context) error {
-	_, err := a.syncIssues(ctx, SyncOptions{})
-	return err
+	if err := a.ensureStore(); err != nil {
+		return err
+	}
+	lastSync, err := a.store.LastSyncTime(ctx, a.config.Context.Name)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if a.now != nil {
+		now = a.now().UTC()
+	}
+
+	decision := decideFreshnessAction(now, lastSync, a.config.Sync)
+	switch decision {
+	case freshnessActionSkip:
+		return nil
+	case freshnessActionSync:
+		_, err := a.syncIssues(ctx, SyncOptions{})
+		return err
+	case freshnessActionCheck:
+		hasUpdates, err := a.hasRemoteUpdatesSince(ctx, lastSync)
+		if err != nil {
+			if a.config.Sync.AllowStaleOnError && !lastSync.IsZero() && now.Sub(lastSync) < a.config.Sync.MaxStaleness() {
+				return nil
+			}
+			return err
+		}
+		if !hasUpdates {
+			return nil
+		}
+		_, err = a.syncIssues(ctx, SyncOptions{})
+		return err
+	default:
+		return nil
+	}
+}
+
+func (a *App) hasRemoteUpdatesSince(ctx context.Context, lastSync time.Time) (bool, error) {
+	issues, err := a.jira.SearchIssues(ctx, SearchOptions{
+		JQL:        a.config.Context.ScopeJQL(),
+		Fields:     []string{"updated"},
+		UpdatedAt:  lastSync,
+		Full:       false,
+		MaxResults: 1,
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(issues) > 0, nil
+}
+
+type freshnessAction string
+
+const (
+	freshnessActionSkip  freshnessAction = "skip"
+	freshnessActionCheck freshnessAction = "check"
+	freshnessActionSync  freshnessAction = "sync"
+)
+
+func decideFreshnessAction(now, lastSync time.Time, cfg SyncConfig) freshnessAction {
+	if lastSync.IsZero() {
+		return freshnessActionSync
+	}
+	age := now.Sub(lastSync)
+	if age >= cfg.MaxStaleness() {
+		return freshnessActionSync
+	}
+	if age >= cfg.CheckInterval() {
+		return freshnessActionCheck
+	}
+	return freshnessActionSkip
 }
 
 func (a *App) syncIssueByKey(ctx context.Context, key string) error {
@@ -818,7 +909,7 @@ jirax — local-first Jira CLI
 
 Commands:
   jirax config show [--json]
-  jirax ctx set --project KEY | --projects A,B | --jql QUERY [--base-url URL --user USER --token TOKEN --ca-cert-file PATH --insecure-skip-verify --fields a,b]
+  jirax ctx set --project KEY | --projects A,B | --jql QUERY [--base-url URL --user USER --token TOKEN --ca-cert-file PATH --insecure-skip-verify --fields a,b --sync-check-minutes N --sync-max-stale-minutes N]
   jirax know [overview|fields|statuses|types|transitions ISSUE-123] [--json]
   jirax sync [--full] [--json]
   jirax issue ISSUE-123 [--json]
@@ -956,6 +1047,9 @@ func (a *App) syncIssues(ctx context.Context, opts SyncOptions) (*SyncResult, er
 		changed++
 	}
 	now := time.Now().UTC()
+	if a.now != nil {
+		now = a.now().UTC()
+	}
 	if err := a.store.RecordSync(ctx, a.config.Context.Name, now); err != nil {
 		return nil, err
 	}

@@ -668,6 +668,37 @@ Notes:
 - local JQL should be explicitly documented as a supported subset, not a claim of full Jira JQL compatibility
 - unsupported local JQL should produce a clear error so callers can retry with remote mode or rely on auto fallback
 
+## 13. Freshness Policy
+
+Read-oriented commands should not blindly run a full sync on every invocation, but they also should not leave the cache stale indefinitely.
+
+Required behavior:
+
+- `know`, `issue`, `search`, and write-oriented commands should run a freshness gate before operating
+- if there has never been a sync for the current context, sync immediately
+- if cache age is below the check interval, use the cache without remote probing
+- if cache age is above the check interval but below max staleness, perform a cheap remote update check
+- if remote updates are detected, run an incremental sync automatically
+- if cache age reaches max staleness, run an incremental sync automatically
+- if the cheap remote check fails and stale-on-error is enabled, allow cached reads to continue only while cache age is still below max staleness
+
+Default policy:
+
+- `check_interval_minutes = 15`
+- `max_staleness_minutes = 240`
+- `allow_stale_on_error = true`
+
+Configuration:
+
+- JSON config should support:
+  - `sync.check_interval_minutes`
+  - `sync.max_staleness_minutes`
+  - `sync.allow_stale_on_error`
+- `.jirax.conf` should support:
+  - `check_interval_minutes=...`
+  - `max_staleness_minutes=...`
+  - `allow_stale_on_error=true|false`
+
 ### 12.8 `jirax create`
 
 Purpose:

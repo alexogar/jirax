@@ -4,6 +4,8 @@
 
 Jirax keeps Jira reads fast, scoped, and scriptable by syncing a slice of your Jira data into a local SQLite database. The CLI uses that local cache for issue lookups and search, while writes stay explicit and guarded with refresh-before-write and dry-run validation.
 
+Read commands also keep the cache reasonably fresh on your behalf. Jirax checks for remote updates after a short interval, auto-syncs when updates exist, and force-syncs once the cache crosses a hard staleness threshold so assistants are less likely to operate on stale data.
+
 ## Status
 
 Jirax is ready to live in a GitHub repository with:
@@ -189,6 +191,7 @@ Set a local context:
 ```bash
 ./jirax ctx set --project DEMO
 ./jirax ctx set --projects DEMO,PLAT,OPS
+./jirax ctx set --project DEMO --sync-check-minutes 10 --sync-max-stale-minutes 120
 ```
 
 Set a real Jira-backed context:
@@ -341,6 +344,37 @@ You can override the database location with:
 
 ```bash
 export JIRAX_DB_PATH=/absolute/path/to/jirax.db
+```
+
+## Freshness Policy
+
+By default, Jirax uses this read-time cache freshness policy:
+
+- if there has never been a sync, sync immediately
+- if the cache is younger than 15 minutes, use it as-is
+- if the cache is older than 15 minutes, do a cheap remote update check
+- if Jira reports updates, sync automatically
+- if the cache reaches 4 hours old, sync automatically even without a prior update signal
+
+You can tune this per project or local overlay config:
+
+```json
+{
+  "sync": {
+    "check_interval_minutes": 10,
+    "max_staleness_minutes": 120,
+    "allow_stale_on_error": true
+  }
+}
+```
+
+Or set it from the CLI when saving context:
+
+```bash
+./jirax ctx set \
+  --projects DEMO,PLAT,OPS \
+  --sync-check-minutes 10 \
+  --sync-max-stale-minutes 120
 ```
 
 ## Notes
