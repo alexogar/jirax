@@ -2,6 +2,8 @@
 
 This folder is a small public Jirax playground aimed at trying the CLI with Codex, Copilot, or manual terminal use.
 
+Use the Jirax CLI as the source of truth for Jira answers in this folder. Do not query `.jirax/jirax.db` directly unless you are explicitly debugging cache internals.
+
 It is preconfigured for Apache's public Jira project:
 
 - Jira base URL: `https://issues.apache.org/jira`
@@ -16,7 +18,7 @@ Use this folder when you want to:
 - test Jirax against a real public Jira
 - try agent workflows without touching your company Jira
 - inspect how project config discovery works
-- experiment with `know`, `search`, and `issue` commands
+- experiment with `know`, `search`, `issue`, and JQL filtering
 
 ## Quick Start
 
@@ -34,6 +36,7 @@ cd example/commons-site
 ../../jirax know --json
 ../../jirax sync --json
 ../../jirax search commons --json
+../../jirax search --jql 'status = "Open"' --mode auto --json
 ../../jirax issue COMMONSSITE-166 --json
 ```
 
@@ -44,11 +47,32 @@ Because `.jirax.json` lives in this folder, Jirax should automatically discover 
 ```bash
 ../../jirax config show --json
 ../../jirax know fields --json
-../../jirax know statuses --json
-../../jirax know types --json
+../../jirax know statuses
+../../jirax know types
 ../../jirax search "build" --json
+../../jirax search --jql 'summary ~ "build"' --mode local --json
+../../jirax search --jql 'status in ("Open", "Reopened")' --mode remote --json
 ../../jirax issue COMMONSSITE-166 --json
 ```
+
+## JQL Playground
+
+This folder is a good place to try both local and remote JQL behavior:
+
+```bash
+../../jirax search --jql 'project = COMMONSSITE AND status = Open' --mode local --json
+../../jirax search --jql 'summary ~ "site" AND labels is not empty' --mode auto --json
+../../jirax search --jql 'reporter = builds' --mode remote --json
+```
+
+Practical guidance:
+
+- Use `--mode local` when you want deterministic cache-only filtering.
+- Use `--mode auto` when you want local-first behavior with remote fallback.
+- Use `--mode remote` when you know the query uses Jira-only features the local subset may not support.
+- Prefer plain `../../jirax know statuses` when you need workflow labels quickly. In current builds, treat `know` subcommands as human-readable first and only pipe to JSON tools after verifying the output is valid JSON.
+- When you need a ranked result such as "oldest open issues," fetch the matching issues with `../../jirax search ... --json` and sort the returned JSON client-side instead of relying on `ORDER BY` in JQL.
+- Remember that this folder already scopes Jirax to `COMMONSSITE`, so your extra JQL is combined with that project scope automatically.
 
 ## Agent Prompts
 

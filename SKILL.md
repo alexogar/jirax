@@ -7,6 +7,8 @@ description: Use this skill when working with the Jirax CLI to inspect Jira cont
 
 Use Jirax as a local-first Jira interface. Prefer read commands that inspect the local cache and current context before making assumptions or issuing writes.
 
+For user-facing Jira answers, use the Jirax CLI as the source of truth. Do not query `.jirax/jirax.db` directly unless the task is specifically about cache internals or low-level debugging.
+
 Jirax may inherit project defaults from `.jirax.json` or `.jirax.conf` in the current folder or one of its parents. Treat those files as part of the working context when results look pre-scoped or repo-specific.
 Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In monorepos, assume multi-project scope is possible until `./jirax config show --json` or `./jirax know --json` says otherwise.
 
@@ -17,8 +19,8 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
    `./jirax config show --json`
 2. Discover schema and workflow vocabulary before planning edits:
    `./jirax know fields --json`
-   `./jirax know statuses --json`
-   `./jirax know types --json`
+   `./jirax know statuses`
+   `./jirax know types`
 3. Inspect specific issues with:
    `./jirax issue ISSUE-123 --json`
 4. Search the synced cache with:
@@ -35,9 +37,10 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
 ## Guidance
 
 - Treat `jirax know` as the default orientation step for agents.
-- Use JSON output whenever the result will feed another step.
+- Use JSON output whenever the result will feed another step, but verify the command actually returns valid JSON before piping it into JSON tooling.
 - Use cached field and status information to avoid inventing field ids, issue types, or workflow states.
 - Prefer `search --jql ... --mode auto --json` when the task needs structured filtering; it uses the cache first and falls back to Jira for unsupported local JQL.
+- When the task needs ranked output such as oldest or newest issues, fetch the matching set with `search --json` and sort client-side instead of relying on `ORDER BY` in JQL.
 - Use `know transitions` before choosing a transition target because workflows vary per issue.
 - In multi-project contexts, pass `--project` explicitly on `create` unless the config clearly resolves to one project.
 - If the local context looks wrong, reset scope with `./jirax ctx set ...` and sync again.
@@ -48,8 +51,8 @@ Contexts may scope a single Jira project, multiple Jira projects, or raw JQL. In
 ```bash
 ./jirax know --json
 ./jirax know fields --json
-./jirax know statuses --json
-./jirax know types --json
+./jirax know statuses
+./jirax know types
 ./jirax know transitions ISSUE-123 --json
 ./jirax issue ISSUE-123 --json
 ./jirax search "text" --json
